@@ -1,4 +1,4 @@
--- Obsidian (mspaint) UI — CLIENT / LOCAL (Modular Fix)
+-- Obsidian (mspaint) UI — CLIENT / LOCAL (Final Fixes)
 local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 
 local Players = game:GetService("Players")
@@ -50,7 +50,7 @@ local Remotes = {
 }
 
 ----------------------------------------------------------------
--- Map Caching Logic
+-- Map Caching Logic (Improved)
 ----------------------------------------------------------------
 local function CacheMap()
     table.clear(CachedDoors)
@@ -62,25 +62,22 @@ local function CacheMap()
         return 
     end
 
-    local sectors = Facility:FindFirstChild("Sectors")
-    if sectors then
-        for _, sector in ipairs(sectors:GetChildren()) do
-            local interactions = sector:FindFirstChild("Interactions")
-            if interactions then
-                if interactions:FindFirstChild("Doors") then
-                    for _, door in ipairs(interactions.Doors:GetChildren()) do
-                        table.insert(CachedDoors, door)
-                    end
-                end
-            end
-            for _, obj in ipairs(sector:GetDescendants()) do
-                if obj.Name == "Glass" and obj:IsA("BasePart") then
-                    table.insert(CachedGlass, obj)
-                end
+    -- Deep scan the entire facility for glass and doors
+    for _, obj in ipairs(Facility:GetDescendants()) do
+        -- Cache Doors
+        if obj.Name == "Doors" and obj:IsA("Folder") then
+            for _, door in ipairs(obj:GetChildren()) do
+                table.insert(CachedDoors, door)
             end
         end
+        
+        -- Cache Glass (Strict check for parts named "Glass")
+        if obj.Name == "Glass" and obj:IsA("BasePart") then
+            table.insert(CachedGlass, obj)
+        end
     end
-    Library:Notify(string.format("Cached: %d Doors, %d Glass", #CachedDoors, #CachedGlass), 3)
+    
+    Library:Notify(string.format("Cached: %d Doors, %d Glass Panes", #CachedDoors, #CachedGlass), 3)
 end
 
 ----------------------------------------------------------------
@@ -189,6 +186,7 @@ pcall(function()
     SpectateToggle:OnChanged(function()
         if not SpectateToggle.Value and LocalPlayer.Character then
             Camera.CameraSubject = LocalPlayer.Character:FindFirstChild("Humanoid")
+            Camera.CameraType = Enum.CameraType.Custom
         end
     end)
     
@@ -201,19 +199,17 @@ pcall(function()
 end)
 
 -- [[ EXPLOITS TAB ]]
--- We create the groupboxes FIRST so they always exist
 local AbilityGroup = Tabs.Exploits:AddLeftGroupbox("Abilities", "zap")
 local HealerGroup = Tabs.Exploits:AddLeftGroupbox("Auto Healer", "heart")
 local InteractGroup = Tabs.Exploits:AddRightGroupbox("Interaction", "hand")
 
--- Chunk 1: Abilities
+-- 1. Abilities
 pcall(function()
     local function PerformCombatSlide()
         local char = LocalPlayer.Character
         if not char then return end
         local hum = char:FindFirstChild("Humanoid")
         
-        -- Animation
         if hum then
             local animator = hum:FindFirstChild("Animator") or hum:WaitForChild("Animator", 1)
             if animator then
@@ -228,7 +224,6 @@ pcall(function()
             end
         end
 
-        -- VFX
         if Remotes.Ability then
             if (getgenv and getgenv().firesignal) or firesignal then
                 local fire = (getgenv and getgenv().firesignal) or firesignal
@@ -241,7 +236,7 @@ pcall(function()
     SlideBtn:AddKeyPicker("SlideKey", { Default = "Z", Text = "Slide Key", Mode = "Hold", Callback = function(v) if v then PerformCombatSlide() end end })
 end)
 
--- Chunk 2: Healer
+-- 2. Healer
 local HealTargetDropdown
 pcall(function()
     HealerGroup:AddDropdown("HealMode", { Text = "Healing Mode", Values = { "Nearest", "Target" }, Default = 1 })
@@ -259,11 +254,23 @@ pcall(function()
     HealerGroup:AddSlider("TweenDistance", { Text = "Distance Below", Default = 10, Min = 5, Max = 50 })
 end)
 
--- Chunk 3: Interactions
+-- 3. Interactions
 pcall(function()
-    InteractGroup:AddLabel("Range: 20 Studs")
+    InteractGroup:AddLabel("Range: 30 Studs")
     InteractGroup:AddToggle("InstaDoors", { Text = "Insta-Doors", Default = false })
     InteractGroup:AddToggle("BreakGlass", { Text = "Break Nearby Glass", Default = false })
+    
+    InteractGroup:AddButton("Force Break All Cached", function()
+        if not Remotes.Glass then return Library:Notify("Glass Remote not found", 3) end
+        for _, glass in ipairs(CachedGlass) do
+            if glass and glass.Parent and glass.Transparency < 0.9 then
+                local force = (glass.Position - LocalPlayer.Character.HumanoidRootPart.Position).Unit * 120
+                Remotes.Glass:FireServer(glass, glass.Position, force, 120, true)
+            end
+        end
+        Library:Notify("Fired break event on all cached glass", 2)
+    end)
+    
     InteractGroup:AddButton("Refresh Map Cache", CacheMap)
 end)
 
@@ -324,6 +331,28 @@ local function GetNearestPlayer()
     return closest
 end
 
+-- RENDER STEPPED (For Camera Spectating)
+RunService.RenderStepped:Connect(function()
+    if SpectateToggle and SpectateToggle.Value then
+        local targetName = ViewerDropdown.Value
+        local target = (type(targetName) == "string") and Players:FindFirstChild(targetName)
+        
+        if target and target.Character then
+            local hum = target.Character:FindFirstChild("Humanoid")
+            if hum then
+                Camera.CameraType = Enum.CameraType.Custom
+                Camera.CameraSubject = hum
+            end
+        else
+            -- Fallback if target lost
+            if LocalPlayer.Character then
+                Camera.CameraSubject = LocalPlayer.Character:FindFirstChild("Humanoid")
+            end
+        end
+    end
+end)
+
+-- HEARTBEAT (UI Updates)
 local lastUiUpdate = 0
 RunService.Heartbeat:Connect(function(dt)
     pcall(function()
@@ -335,7 +364,7 @@ RunService.Heartbeat:Connect(function(dt)
                 ViewerLabels.Region:SetText("Region: " .. tostring(getAnyAttr(target, "RegionCode") or "N/A"))
                 ViewerLabels.Credits:SetText("Credits: " .. formatInt(getAnyAttr(target, "Credits")))
                 
-                if Library.Toggles.ShowHUD and Library.Toggles.ShowHUD.Value then
+                if Library.Toggles.ShowHUD.Value then
                     local hp = target.Character and target.Character:FindFirstChild("Humanoid") and math.floor(target.Character.Humanoid.Health) or "N/A"
                     local exp = getAnyAttr(target, "Exposure") or 0
                     BioHUD:SetText(string.format("Fentsite V.67 | HP: %s | EXP: %.1f%% | $: %s", tostring(hp), tonumber(exp) or 0, formatInt(getAnyAttr(target, "Credits"))))
@@ -347,22 +376,15 @@ RunService.Heartbeat:Connect(function(dt)
                 ZetaLabels.Exposure:SetText("Exposure: " .. string.format("%.2f", tonumber(getAnyAttr(zPlr, "Exposure")) or 0))
                 ZetaLabels.Mut:SetText("Mutation: " .. tostring(getAnyAttr(zPlr, "MutationType") or "N/A"))
                 ZetaLabels.Adv:SetText("Adv: " .. tostring(getAnyAttr(zPlr, "HasReachedAdvancedMutation") or "N/A"))
-                
                 local s = tonumber(getAnyAttr(zPlr, "Strength") or getAnyAttr(zPlr, "StrengthAttribute"))
                 if s then ZetaLabels.Str:SetText(string.format("Strength: %.2f", s)) end
             end
             lastUiUpdate = 0
         end
-        
-        if SpectateToggle and SpectateToggle.Value then
-            local target = Players:FindFirstChild(ViewerDropdown.Value)
-            if target and target.Character and target.Character:FindFirstChild("Humanoid") then
-                Camera.CameraSubject = target.Character.Humanoid
-            end
-        end
     end)
 end)
 
+-- HEARTBEAT (Exploits)
 local lastAction = 0
 RunService.Heartbeat:Connect(function(dt)
     pcall(function()
@@ -389,21 +411,23 @@ RunService.Heartbeat:Connect(function(dt)
             if myRoot then
                 local myPos = myRoot.Position
                 
+                -- Doors
                 if Library.Toggles.InstaDoors.Value and Remotes.Door then
                     for _, door in ipairs(CachedDoors) do
                         if door and door.Parent then
                             local part = door:IsA("Model") and door.PrimaryPart or door:FindFirstChild("Door") or door
-                            if part and part:IsA("BasePart") and (part.Position - myPos).Magnitude < 20 then
+                            if part and part:IsA("BasePart") and (part.Position - myPos).Magnitude < 30 then
                                 Remotes.Door:InvokeServer("ServerInteraction", door, Enum.NormalId.Front, nil, "GenericInteraction")
                             end
                         end
                     end
                 end
 
+                -- Glass
                 if Library.Toggles.BreakGlass.Value and Remotes.Glass then
                     for _, glass in ipairs(CachedGlass) do
-                        if glass and glass.Parent and glass.Transparency < 0.9 and (glass.Position - myPos).Magnitude < 20 then
-                             local force = (glass.Position - myPos).Unit * 50
+                        if glass and glass.Parent and glass.Transparency < 0.9 and (glass.Position - myPos).Magnitude < 30 then
+                             local force = (glass.Position - myPos).Unit * 120 -- Increased force
                              Remotes.Glass:FireServer(glass, glass.Position, force, 120, true)
                         end
                     end
