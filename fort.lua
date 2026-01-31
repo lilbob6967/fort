@@ -63,6 +63,7 @@ local Tabs = {
     Exploits = Window:AddTab("Exploits", "zap"),
     Fun = Window:AddTab("Fun", "smile"),
     Zeta = Window:AddTab("Zeta", "star"),
+    ESP = Window:AddTab("ESP", "eye"),
     UI = Window:AddTab("UI Settings", "settings"),
 }
 
@@ -153,6 +154,14 @@ local function UpdateHighlight(targetModel, color, name)
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     hl.Enabled = true
     return hl
+end
+
+local function ClearHighlightsWithName(name)
+    for _, p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        local hl = char and char:FindFirstChild(name)
+        if hl then hl:Destroy() end
+    end
 end
 
 local function formatInt(n)
@@ -325,6 +334,7 @@ local function UpdatePlayerStatus(player)
     CombatStorage[player].HasPRM = hasPRM
     CombatStorage[player].Perk = activePerk
     CombatStorage[player].Evo = activeEvo
+    CombatStorage[player].Armor = char:GetAttribute("Armor") or 0
     CombatStorage[player].IsProtected = char:FindFirstChildOfClass("ForceField") ~= nil
 end
 
@@ -374,10 +384,11 @@ local function CreatePlayerESP(player)
         EvoTag = Drawing.new("Text"),
         PerkTag = Drawing.new("Text"),
         PRMTag = Drawing.new("Text"),
+        ArmorTag = Drawing.new("Text"),
         Distance = Drawing.new("Text")
     }
     
-    for _, tag in pairs({drawings.Name, drawings.EvoTag, drawings.PerkTag, drawings.Status, drawings.PRMTag, drawings.Distance}) do
+    for _, tag in pairs({drawings.Name, drawings.EvoTag, drawings.PerkTag, drawings.Status, drawings.PRMTag, drawings.ArmorTag, drawings.Distance}) do
         tag.Center = true; tag.Outline = true
     end
     
@@ -385,6 +396,7 @@ local function CreatePlayerESP(player)
     drawings.EvoTag.Color = Color3.new(1, 1, 1)
     drawings.PerkTag.Color = Color3.new(1, 1, 1)
     drawings.PRMTag.Color = Color3.fromRGB(160, 160, 160)
+    drawings.ArmorTag.Color = Color3.fromRGB(0, 255, 255)
     drawings.BarOutline.Color = Color3.new(0,0,0)
     drawings.Bar.Filled = true; drawings.Bar.Color = Color3.new(0, 1, 0)
 
@@ -439,6 +451,11 @@ local function CreatePlayerESP(player)
                 if Library.Toggles.ESPPRM.Value and s.HasPRM then
                     drawings.PRMTag.Visible = true; drawings.PRMTag.Text = "PRM"; drawings.PRMTag.Size = fontSize; drawings.PRMTag.Position = Vector2.new(pos.X, currentY); currentY = currentY + fontSize
                 else drawings.PRMTag.Visible = false end
+
+                if Library.Toggles.ESPArmor.Value and s.Armor and s.Armor > 0 then
+                    drawings.ArmorTag.Visible = true; drawings.ArmorTag.Text = "Armor: " .. math.floor(s.Armor)
+                    drawings.ArmorTag.Size = fontSize; drawings.ArmorTag.Position = Vector2.new(pos.X, currentY); currentY = currentY + fontSize
+                else drawings.ArmorTag.Visible = false end
 
                 if Library.Toggles.ESPDistance.Value then
                     drawings.Distance.Visible = true; drawings.Distance.Text = math.floor(dist) .. "m"; drawings.Distance.Size = fontSize + 2; drawings.Distance.Color = teamColor; drawings.Distance.Position = Vector2.new(pos.X, currentY + 2)
@@ -761,7 +778,7 @@ MainGroup:AddButton({
     Tooltip = "Scans workspace for interactive doors and glass objects for exploits"
 })
 
-local ItemScanGroup = Tabs.Main:AddRightGroupbox("Item Scanner")
+local ItemScanGroup = Tabs.ESP:AddLeftGroupbox("Item Scanner")
 ItemScanGroup:AddButton({
     Text = "Scan for Items",
     Func = function()
@@ -822,7 +839,7 @@ ItemScanGroup:AddButton({
     Tooltip = "Teleports you to the nearest instance of the selected item."
 })
 
-local WeaponScanGroup = Tabs.Main:AddRightGroupbox("Weapon Scanner")
+local WeaponScanGroup = Tabs.ESP:AddRightGroupbox("Weapon Scanner")
 WeaponScanGroup:AddButton({
     Text = "Scan for Weapons",
     Func = function()
@@ -994,7 +1011,7 @@ EliteRight:AddSlider("VoidRange", {
 ----------------------------------------------------------------
 -- TAB 3: VISUALS
 ----------------------------------------------------------------
-local VisualLeft = Tabs.Visuals:AddLeftGroupbox("Overlay Settings")
+local VisualLeft = Tabs.ESP:AddLeftGroupbox("Player ESP")
 VisualLeft:AddToggle("ShowHUD", { 
     Text = "Enable Bio-HUD", 
     Default = false, 
@@ -1016,12 +1033,13 @@ VisualLeft:AddToggle("CombatESP", {
     Tooltip = "Keybind for Advanced Player ESP"
 })
 
-local ESPOpt = Tabs.Visuals:AddLeftGroupbox("ESP Customization")
+local ESPOpt = Tabs.ESP:AddRightGroupbox("ESP Customization")
 ESPOpt:AddToggle("ESPServerStatus", { Text = "Show Status (Traitor/Mutant)", Default = true })
 ESPOpt:AddToggle("ESPEvolution", { Text = "Show Evolution Stages", Default = true })
 ESPOpt:AddToggle("ESPPerks", { Text = "Show Player Perks", Default = true })
 ESPOpt:AddToggle("ESPPRM", { Text = "Show PRM Status", Default = true })
 ESPOpt:AddToggle("ESPDistance", { Text = "Show Distance", Default = true })
+ESPOpt:AddToggle("ESPArmor", { Text = "Show Armor Status", Default = true })
 
 
 local InspectRight = Tabs.Visuals:AddRightGroupbox("Target Inspector")
@@ -1048,6 +1066,39 @@ InspectRight:AddToggle("HighlightTarget", {
     Default = false, 
     Tooltip = "Applies a purple ESP outline to the selected target's character" 
 })
+
+local ShowcaseGroup = Tabs.Visuals:AddRightGroupbox("ESP Showcase")
+local ShowcaseFrame = ShowcaseGroup:AddLabel("Preview Layout")
+
+-- Showcase dynamic update logic
+local ShowcaseLabels = {
+    Status = ShowcaseGroup:AddLabel("TRAITOR"),
+    Name = ShowcaseGroup:AddLabel("PlayerName"),
+    Health = ShowcaseGroup:AddLabel("[ |||||||||| ]"),
+    Evo = ShowcaseGroup:AddLabel("Evo: Advanced"),
+    Perk = ShowcaseGroup:AddLabel("Perks: Brute"),
+    Armor = ShowcaseGroup:AddLabel("Armor: 50"),
+    PRM = ShowcaseGroup:AddLabel("PRM"),
+    Distance = ShowcaseGroup:AddLabel("150m")
+}
+
+local function UpdateShowcase()
+    ShowcaseLabels.Status.Visible = Library.Toggles.ESPServerStatus.Value
+    ShowcaseLabels.Name.Visible = true
+    ShowcaseLabels.Health.Visible = true
+    ShowcaseLabels.Evo.Visible = Library.Toggles.ESPEvolution.Value
+    ShowcaseLabels.Perk.Visible = Library.Toggles.ESPPerks.Value
+    ShowcaseLabels.Armor.Visible = Library.Toggles.ESPArmor.Value
+    ShowcaseLabels.PRM.Visible = Library.Toggles.ESPPRM.Value
+    ShowcaseLabels.Distance.Visible = Library.Toggles.ESPDistance.Value
+end
+
+-- Connect showcase updates
+for _, toggle in pairs({"ESPServerStatus", "ESPEvolution", "ESPPerks", "ESPArmor", "ESPPRM", "ESPDistance"}) do
+    Library.Toggles[toggle]:OnChanged(UpdateShowcase)
+end
+
+UpdateShowcase()
 
 InspectRight:AddToggle("SpectateTarget", { 
     Text = "Spectate Subject", 
@@ -1200,18 +1251,12 @@ FunLeft:AddToggle("FS_Wallcheck", {
 })
 
 FunLeft:AddToggle("EnableFlashstep", { 
-    Text = "Flashstep (Dash)", 
+    Text = "Enable Flashstep (Dash)", 
     Default = false, 
-    Tooltip = "Forward dash with ground snap and VFX ghost trail effect",
-    Callback = function(state)
-        if state then
-            DoFlashstep(1)
-            task.delay(0.1, function() Library.Toggles.EnableFlashstep:SetValue(false) end)
-        end
-    end
+    Tooltip = "When enabled, press the keybind (default Q) to dash forward"
 }):AddKeyPicker("KD", { 
     Default = "Q", 
-    SyncToggleState = true,
+    SyncToggleState = false, 
     Mode = "Toggle",
     Tooltip = "Keybind for Flashstep (Dash)"
 })
@@ -1225,18 +1270,12 @@ FunLeft:AddSlider("FlashDistance", {
 })
 
 FunLeft:AddToggle("EnableBehindStep", { 
-    Text = "Flashstep (Behind)", 
+    Text = "Enable Flashstep (Behind)", 
     Default = false, 
-    Tooltip = "Teleports immediately behind the enemy closest to your mouse cursor",
-    Callback = function(state)
-        if state then
-            DoFlashstep(2)
-            task.delay(0.1, function() Library.Toggles.EnableBehindStep:SetValue(false) end)
-        end
-    end
+    Tooltip = "When enabled, press the keybind (default E) to dash behind enemies"
 }):AddKeyPicker("KB", { 
     Default = "E", 
-    SyncToggleState = true,
+    SyncToggleState = false, 
     Mode = "Toggle",
     Tooltip = "Keybind for Flashstep (Behind)"
 })
@@ -1370,6 +1409,17 @@ RunService.RenderStepped:Connect(function(deltaTime)
                     UpdateHighlight(player.Character, Color3.fromRGB(255, 255, 0), player.Name .. "_Adr") 
                 end 
             end
+        else
+            ClearHighlightsWithName(LocalPlayer.Name .. "_Adr") -- Generic cleanup for ADR
+            for _, p in ipairs(Players:GetPlayers()) do
+                local hl = p.Character and p.Character:FindFirstChild(p.Name .. "_Adr")
+                if hl then hl:Destroy() end
+            end
+        end
+    else
+        for _, p in ipairs(Players:GetPlayers()) do
+            local hl = p.Character and p.Character:FindFirstChild(p.Name .. "_Adr")
+            if hl then hl:Destroy() end
         end
     end
 
@@ -1382,6 +1432,14 @@ RunService.RenderStepped:Connect(function(deltaTime)
                 UpdateHighlight(player.Character, Color3.new(1, 1, 0), player.Name .. "S") 
             end
         end
+    else
+        if SixEyesCC.Enabled then
+            SixEyesCC.Enabled = false
+            for _, p in ipairs(Players:GetPlayers()) do
+                local hl = p.Character and p.Character:FindFirstChild(p.Name .. "S")
+                if hl then hl:Destroy() end
+            end
+        end
     end
     
     -- Elite: Infinite Void
@@ -1391,6 +1449,11 @@ RunService.RenderStepped:Connect(function(deltaTime)
                 local healthPercent = player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth
                 UpdateHighlight(player.Character, Color3.fromHSV(math.clamp(healthPercent, 0, 1) * 0.33, 1, 1), player.Name .. "V")
             end
+        end
+    else
+        for _, p in ipairs(Players:GetPlayers()) do
+            local hl = p.Character and p.Character:FindFirstChild(p.Name .. "V")
+            if hl then hl:Destroy() end
         end
     end
 
@@ -1545,7 +1608,7 @@ RunService.RenderStepped:Connect(function(deltaTime)
         for _, p in ipairs(Players:GetPlayers()) do
             local char = p.Character
             local hl = char and char:FindFirstChild("TargetHL")
-            if hl then hl.Enabled = false end
+            if hl then hl:Destroy() end
         end
     else
         -- Remove highlight from players who are NOT the current target
@@ -1553,7 +1616,7 @@ RunService.RenderStepped:Connect(function(deltaTime)
             if p.Name ~= targetName then
                 local char = p.Character
                 local hl = char and char:FindFirstChild("TargetHL")
-                if hl then hl.Enabled = false end
+                if hl then hl:Destroy() end
             end
         end
     end
@@ -1748,6 +1811,21 @@ for _, p in ipairs(Players:GetPlayers()) do
 end
 
 UpdatePlayerDropdowns()
+
+-- Global Keybind Handler for Flashsteps
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    
+    -- Dash Trigger
+    if input.KeyCode == Library.Options.KD.Value and Library.Toggles.EnableFlashstep.Value then
+        DoFlashstep(1)
+    end
+    
+    -- Behind Step Trigger
+    if input.KeyCode == Library.Options.KB.Value and Library.Toggles.EnableBehindStep.Value then
+        DoFlashstep(2)
+    end
+end)
 
 ----------------------------------------------------------------
 -- INITIALIZATION COMPLETE
